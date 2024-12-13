@@ -1,5 +1,7 @@
 ## Hi there 👋
 
+I'm Lewis, a Software Engineer at GitHub
+
 <!--
 **lewis-mcgillion/lewis-mcgillion** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
