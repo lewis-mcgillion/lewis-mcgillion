@@ -1,6 +1,6 @@
 ## Hi there 👋
 
-I'm Lewis, a Software Engineer at GitHub working on Copilot Knowledge Bases
+I'm Lewis, a Software Engineer at GitHub working on Copilot
 
 <!--
 **lewis-mcgillion/lewis-mcgillion** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
