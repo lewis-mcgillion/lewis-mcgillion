@@ -66,7 +66,7 @@ async function writeJson(dir: string, filename: string, data: unknown): Promise<
   await mkdir(dir, { recursive: true });
   const path = join(dir, filename);
   await writeFile(path, JSON.stringify(data, null, 2), "utf-8");
-  console.log(`  ✓ ${path} (${Array.isArray(data) ? data.length : 1} items)`);
+  console.log(`  ✓ ${filename} (${Array.isArray(data) ? data.length : 0} items)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +178,7 @@ async function fetchPRReviews(
         }
       }
     } catch {
-      console.warn(`  ⚠ Could not fetch reviews for PR #${pr.number} in ${owner}/${repo}`);
+      console.warn(`  ⚠ Could not fetch reviews for a PR`);
     }
   }
   return reviews;
@@ -228,7 +228,7 @@ async function fetchPRComments(
 // Rate-limit aware wrapper
 // ---------------------------------------------------------------------------
 
-async function withRateLimit<T>(fn: () => Promise<T>, label: string): Promise<T> {
+async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err: unknown) {
@@ -237,7 +237,7 @@ async function withRateLimit<T>(fn: () => Promise<T>, label: string): Promise<T>
       const resetHeader = e.response?.headers?.["x-ratelimit-reset"];
       const resetTime = resetHeader ? parseInt(resetHeader, 10) * 1000 : Date.now() + 60_000;
       const waitMs = Math.max(resetTime - Date.now(), 1000);
-      console.warn(`  ⏳ Rate limited on ${label}. Waiting ${Math.round(waitMs / 1000)}s...`);
+      console.warn(`  ⏳ Rate limited. Waiting ${Math.round(waitMs / 1000)}s...`);
       await new Promise((r) => setTimeout(r, waitMs));
       return fn();
     }
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
 
   const ranges = monthRanges(args.startDate, args.endDate);
   console.log(`\nFetching data for ${ranges.length} month(s): ${ranges.map((r) => `${r.year}-${r.month}`).join(", ")}`);
-  console.log(`Repos: ${args.repos.join(", ")}`);
+  console.log(`Repos: ${args.repos.length} repo(s)`);
   console.log(`Username: ${args.username}\n`);
 
   for (const range of ranges) {
@@ -285,47 +285,41 @@ async function main(): Promise<void> {
 
     for (const repoFull of args.repos) {
       const [owner, repo] = repoFull.split("/");
-      console.log(`\n  📦 ${owner}/${repo}`);
+      const repoIndex = args.repos.indexOf(repoFull) + 1;
+      console.log(`\n  📦 Repo ${repoIndex}/${args.repos.length}`);
 
       const issuesCreated = await withRateLimit(
-        () => fetchIssuesCreated(octokit, owner, repo, args.username, range.since, range.until),
-        `issues-created:${repoFull}`
+        () => fetchIssuesCreated(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssuesCreated.push(...issuesCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const issuesAssigned = await withRateLimit(
-        () => fetchIssuesAssigned(octokit, owner, repo, args.username, range.since, range.until),
-        `issues-assigned:${repoFull}`
+        () => fetchIssuesAssigned(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssuesAssigned.push(...issuesAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prsCreated = await withRateLimit(
-        () => fetchPRsCreated(octokit, owner, repo, args.username, range.since, range.until),
-        `prs-created:${repoFull}`
+        () => fetchPRsCreated(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRsCreated.push(...prsCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prsAssigned = await withRateLimit(
-        () => fetchPRsAssigned(octokit, owner, repo, args.username, range.since, range.until),
-        `prs-assigned:${repoFull}`
+        () => fetchPRsAssigned(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRsAssigned.push(...prsAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prReviews = await withRateLimit(
-        () => fetchPRReviews(octokit, owner, repo, args.username, range.since, range.until),
-        `pr-reviews:${repoFull}`
+        () => fetchPRReviews(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRReviews.push(...prReviews.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const issueComments = await withRateLimit(
-        () => fetchIssueComments(octokit, owner, repo, args.username, range.since, range.until),
-        `issue-comments:${repoFull}`
+        () => fetchIssueComments(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssueComments.push(...issueComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prComments = await withRateLimit(
-        () => fetchPRComments(octokit, owner, repo, args.username, range.since, range.until),
-        `pr-comments:${repoFull}`
+        () => fetchPRComments(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRComments.push(...prComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
     }
@@ -353,6 +347,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  const e = err as { status?: number; message?: string };
+  if (e.status) {
+    console.error(`Fatal error: HTTP ${e.status} — ${e.message ?? "unknown error"}`);
+  } else {
+    console.error(`Fatal error: ${e.message ?? "unknown error"}`);
+  }
   process.exit(1);
 });
