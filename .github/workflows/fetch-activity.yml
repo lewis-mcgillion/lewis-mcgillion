@@ -1,0 +1,112 @@
+name: Fetch GitHub Activity
+
+on:
+  schedule:
+    # Run at midnight UTC on the 1st of every month
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Start date (YYYY-MM-DD) for backfill. Defaults to previous month."
+        required: false
+        type: string
+      end_date:
+        description: "End date (YYYY-MM-DD) for backfill. Defaults to end of previous month."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout public repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine date range
+        id: dates
+        run: |
+          if [ -n "${{ inputs.start_date }}" ]; then
+            echo "start_date=${{ inputs.start_date }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "start_date=$(date -d 'last month' '+%Y-%m-01' 2>/dev/null || date -v-1m '+%Y-%m-01')" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.end_date }}" ]; then
+            echo "end_date=${{ inputs.end_date }}" >> "$GITHUB_OUTPUT"
+          else
+            # Last day of previous month
+            echo "end_date=$(date -d "$(date '+%Y-%m-01') - 1 day" '+%Y-%m-%d' 2>/dev/null || date -v1d -v-1d '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build repo list from secrets
+        id: repos
+        run: |
+          REPO_LIST=""
+          for repo in "${{ secrets.REPO_1 }}" "${{ secrets.REPO_2 }}" "${{ secrets.REPO_3 }}" "${{ secrets.REPO_4 }}" "${{ secrets.REPO_5 }}" "${{ secrets.REPO_6 }}"; do
+            if [ -n "$repo" ]; then
+              if [ -n "$REPO_LIST" ]; then
+                REPO_LIST="$REPO_LIST,$repo"
+              else
+                REPO_LIST="$repo"
+              fi
+            fi
+          done
+          echo "repo_list=$REPO_LIST" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch activity data
+        env:
+          GITHUB_TOKEN: ${{ secrets.CAREER_DATA_PAT }}
+        run: |
+          npx tsx scripts/fetch-activity.ts \
+            --start-date "${{ steps.dates.outputs.start_date }}" \
+            --end-date "${{ steps.dates.outputs.end_date }}" \
+            --repos "${{ steps.repos.outputs.repo_list }}" \
+            --username "${{ github.repository_owner }}" \
+            --output-dir "./fetched-data" \
+            --token "${{ secrets.CAREER_DATA_PAT }}"
+
+      - name: Push data to private career-data repo
+        env:
+          PAT: ${{ secrets.CAREER_DATA_PAT }}
+        run: |
+          git clone https://x-access-token:${PAT}@github.com/${{ github.repository_owner }}/career-data.git /tmp/career-data
+          cp -r ./fetched-data/* /tmp/career-data/data/
+          cd /tmp/career-data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No new data to commit"
+          else
+            git commit -m "data: $(date '+%Y-%m') activity fetch
+
+          Date range: ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}
+
+          Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+            git push
+            echo "✅ Data pushed to career-data repo"
+          fi
+
+      - name: Save date range for summary workflow
+        run: |
+          echo "${{ steps.dates.outputs.start_date }}" > /tmp/start_date.txt
+          echo "${{ steps.dates.outputs.end_date }}" > /tmp/end_date.txt
+
+      - name: Upload date range artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: date-range
+          path: |
+            /tmp/start_date.txt
+            /tmp/end_date.txt
