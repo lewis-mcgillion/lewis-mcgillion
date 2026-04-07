@@ -38,17 +38,15 @@ jobs:
         env:
           PAT: ${{ secrets.CAREER_DATA_PAT }}
         run: |
-          git clone https://x-access-token:${PAT}@github.com/${{ github.repository_owner }}/career-data.git /tmp/career-data
-          echo "Available data months:"
-          ls /tmp/career-data/data/ 2>/dev/null || echo "No data yet"
+          git -c "credential.helper=!f(){ echo username=x-access-token; echo password=${PAT}; };f" \
+            clone https://github.com/${{ github.repository_owner }}/career-data.git /tmp/career-data 2>/dev/null
+          echo "Data months available: $(ls /tmp/career-data/data/ 2>/dev/null | wc -l | tr -d ' ')"
 
       - name: Create Copilot agent issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CAREER_PAT: ${{ secrets.CAREER_DATA_PAT }}
         run: |
           TARGET_MONTHS="${{ steps.months.outputs.months }}"
-          OWNER="${{ github.repository_owner }}"
 
           ISSUE_BODY=$(cat <<'ISSUE_EOF'
           ## Task: Generate Achievement Summary
@@ -57,12 +55,8 @@ jobs:
 
           ### Instructions
 
-          1. **Clone the private data repo:**
-             ```bash
-             git clone https://x-access-token:${CAREER_PAT}@github.com/OWNER_PLACEHOLDER/career-data.git /tmp/career-data
-             ```
-
-          2. **For each target month**, read the JSON files from `/tmp/career-data/data/YYYY-MM/`:
+          1. **Read the raw data** from the private data repo already cloned at
+             `/tmp/career-data`. Read JSON files from `/tmp/career-data/data/YYYY-MM/`:
              - `issues-created.json` — Issues I opened
              - `issues-assigned.json` — Issues assigned to me
              - `prs-created.json` — PRs I authored
@@ -71,32 +65,42 @@ jobs:
              - `issue-comments.json` — My issue comments
              - `pr-comments.json` — My PR review comments
 
-          3. **Generate/update a monthly achievement file** at `achievements/YYYY-MM.md`:
-             - Use the template at `achievements/TEMPLATE.md` for structure
+          2. **Generate/update a monthly achievement file** at `/tmp/career-data/achievements/YYYY-MM.md`:
+             - Use the template at `/tmp/career-data/achievements/TEMPLATE.md` for structure
              - Follow ALL sanitization rules in `.github/copilot-instructions.md`
              - Focus on impact, themes, and accomplishments — NOT raw activity
-             - Be specific about technical contributions while keeping repo names generic
 
-          4. **Update `achievements/SUMMARY.md`**:
+          3. **Update `/tmp/career-data/achievements/SUMMARY.md`**:
              - Add/update the entry for each processed month
              - Keep entries in chronological order
-             - Each month should have a 2-3 sentence highlight linking to the monthly file
 
-          5. **Commit and push** all changes to this repository.
+          4. **Commit and push to the private repo only**:
+             ```bash
+             cd /tmp/career-data
+             git add achievements/*.md
+             git diff --cached --stat  # verify only .md files staged
+             git commit -m "Update achievements for TARGET_MONTHS_PLACEHOLDER"
+             git push
+             ```
 
           ### Important Reminders
-          - Read `.github/copilot-instructions.md` for detailed sanitization rules
+          - Read `.github/copilot-instructions.md` for full sanitization and safety rules
+          - ALL output goes to the PRIVATE career-data repo, not the public profile repo
           - NEVER include internal repo names, issue numbers, or direct links
-          - Use performance-review-friendly language
-          - Quantify contributions where possible
+          - NEVER print JSON file contents to stdout (your output is visible here)
+          - NEVER run `git add .` — only `git add achievements/*.md`
+          - NEVER read files in `/tmp/career-data/.git/`
           ISSUE_EOF
           )
 
-          # Replace placeholders
           ISSUE_BODY="${ISSUE_BODY//TARGET_MONTHS_PLACEHOLDER/$TARGET_MONTHS}"
-          ISSUE_BODY="${ISSUE_BODY//OWNER_PLACEHOLDER/$OWNER}"
 
           gh issue create \
-            --title "Generate achievement summary for ${TARGET_MONTHS}" \
+            --title "Generate achievement summary" \
             --body "$ISSUE_BODY" \
             --label "copilot"
+
+      - name: Clean up sensitive data
+        if: always()
+        run: |
+          rm -rf /tmp/career-data

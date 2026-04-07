@@ -2,6 +2,25 @@
 
 A step-by-step guide to set up your own automated career achievements tracker. This system fetches your GitHub activity monthly and uses a Copilot coding agent to generate polished achievement summaries — perfect for performance reviews.
 
+## How it works
+
+```
+Your Profile Repo (<username>/<username>)     [PUBLIC]
+├── .github/workflows/ (fetch + summarize)
+├── .github/copilot-instructions.md
+├── career-tracker/scripts/ (TypeScript fetcher)
+├── career-tracker/package.json
+└── Secrets (repo names, PAT)
+         │
+         │ fetches data, triggers agent
+         ▼
+career-data repo (<username>/career-data)     [PRIVATE]
+├── data/YYYY-MM/*.json (raw GitHub API data)
+└── achievements/*.md (monthly summaries)
+```
+
+Everything sensitive — raw data AND achievement summaries — lives in the private repo. The public repo only contains the reusable infrastructure.
+
 ## Prerequisites
 
 - A GitHub account with a [profile repository](https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-github-profile/customizing-your-profile/managing-your-profile-readme) (`<username>/<username>`)
@@ -20,14 +39,15 @@ git clone https://github.com/lewis-mcgillion/lewis-mcgillion.git
 cd lewis-mcgillion
 
 # 2. Install dependencies
-npm install
+cd career-tracker && npm install
 
 # 3. Run the bootstrap script
 npx tsx scripts/bootstrap.ts
 ```
 
 The bootstrap script will interactively:
-- ✅ Create a private `career-data` repo for raw data
+- ✅ Create a private `career-data` repo for raw data and summaries
+- ✅ Verify the private repo is actually private
 - ✅ Configure all required GitHub Actions secrets
 - ✅ Set up the `copilot` label for the agent
 
@@ -37,7 +57,7 @@ If you prefer to set things up manually, follow these steps:
 
 ### 1. Copy Files to Your Profile Repo
 
-Copy the following files/directories to your `<username>/<username>` repo:
+Copy these files/directories to your `<username>/<username>` repo:
 
 ```
 .github/
@@ -46,14 +66,12 @@ Copy the following files/directories to your `<username>/<username>` repo:
 └── workflows/
     ├── fetch-activity.yml
     └── generate-summary.yml
-scripts/
-├── fetch-activity.ts
-└── bootstrap.ts
-achievements/
-├── SUMMARY.md
-└── TEMPLATE.md
-package.json
-tsconfig.json
+career-tracker/
+├── scripts/
+│   ├── fetch-activity.ts
+│   └── bootstrap.ts
+├── package.json
+└── tsconfig.json
 ```
 
 ### 2. Create a Personal Access Token (PAT)
@@ -101,7 +119,7 @@ gh label create copilot \
 
 ```bash
 cd <your-profile-repo>
-npm install
+cd career-tracker && npm install && cd ..
 git add -A
 git commit -m "Add career achievements tracker"
 git push
@@ -120,7 +138,6 @@ The `fetch-activity` workflow runs automatically at midnight UTC on the 1st of e
 To fetch historical data back to a specific date:
 
 ```bash
-# Fetch all data from January 2025 to now
 gh workflow run fetch-activity.yml \
   --repo <username>/<username> \
   -f start_date=2025-01-01 \
@@ -132,7 +149,7 @@ Then trigger the summary generation for all months:
 ```bash
 gh workflow run generate-summary.yml \
   --repo <username>/<username> \
-  -f months="2025-01,2025-02,2025-03,2025-04,2025-05,2025-06,2025-07,2025-08,2025-09,2025-10,2025-11,2025-12,2026-01,2026-02,2026-03"
+  -f months="2025-01,2025-02,2025-03"
 ```
 
 ### Re-generate a Specific Month
@@ -173,7 +190,7 @@ Edit `.github/copilot-instructions.md` to change:
 - Tone and language preferences
 - What data to emphasize or de-emphasize
 
-Edit `achievements/TEMPLATE.md` to change the default template structure.
+Edit `achievements/TEMPLATE.md` in your private career-data repo to change the template structure.
 
 ## Troubleshooting
 
@@ -192,28 +209,11 @@ Ensure the `copilot` label exists on your profile repo and that Copilot coding a
 ### No data for a month
 Check the private `career-data` repo to see if the JSON files were populated. If they're empty, verify you have activity in the tracked repos for that period.
 
-## Architecture
-
-```
-Your Profile Repo (<username>/<username>)     [PUBLIC]
-├── Workflows (fetch + summarize)
-├── Scripts (TypeScript data fetcher)
-├── achievements/ (sanitized markdown)
-└── Secrets (repo names, PAT)
-         │
-         │ pushes raw data
-         ▼
-career-data repo (<username>/career-data)     [PRIVATE]
-└── data/YYYY-MM/*.json (raw GitHub API data)
-```
-
 ## Security
 
-- **Raw data** (issue titles, PR descriptions, comments) is stored only in the private `career-data` repo
-- **Achievement summaries** in the public repo are sanitized — no internal repo names, issue numbers, or links
-- **Repo names** are stored as GitHub Actions secrets, never in code
-- **PATs** are stored as secrets and never logged
-
----
-
-*Built with ❤️ by [lewis-mcgillion](https://github.com/lewis-mcgillion). Questions? Open an issue!*
+- **Everything sensitive is private** — raw data AND achievement summaries live in the private `career-data` repo
+- **The public repo is just infrastructure** — workflows, scripts, and setup docs. No data.
+- **Repo names** are stored as GitHub Actions secrets, never in code or logs
+- **PATs** are passed via environment variables, never as command-line arguments
+- **Error messages** are sanitized to strip URLs and repo names before logging
+- **The Copilot agent** writes only to the private repo, never the public one

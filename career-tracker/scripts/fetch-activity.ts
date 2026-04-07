@@ -32,10 +32,10 @@ function parseArgs(): Args {
   return {
     startDate: get("--start-date", format(startOfMonth(lastMonth), "yyyy-MM-dd")),
     endDate: get("--end-date", format(endOfMonth(lastMonth), "yyyy-MM-dd")),
-    repos: get("--repos").split(",").map((r) => r.trim()),
+    repos: (process.env.TRACKED_REPOS ?? get("--repos")).split(",").map((r) => r.trim()),
     username: get("--username"),
     outputDir: get("--output-dir", "./data"),
-    token: get("--token", process.env.GITHUB_TOKEN ?? ""),
+    token: process.env.GITHUB_TOKEN ?? get("--token", ""),
   };
 }
 
@@ -225,23 +225,59 @@ async function fetchPRComments(
 }
 
 // ---------------------------------------------------------------------------
-// Rate-limit aware wrapper
+// Error sanitization — strip repo names, URLs, and sensitive data from errors
 // ---------------------------------------------------------------------------
 
-async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+/** Extracts unique org names from repo list for targeted redaction */
+let _orgNames: string[] = [];
+let _repoNames: string[] = [];
+function setRedactTargets(repos: string[]): void {
+  _orgNames = [...new Set(repos.map((r) => r.split("/")[0]))];
+  _repoNames = [...new Set(repos.map((r) => r.split("/")[1]).filter(Boolean))];
+}
+
+function sanitizeError(err: unknown): string {
+  const e = err as { status?: number; message?: string };
+  if (e.status) return `HTTP ${e.status}`;
+  let msg = String(e.message ?? "unknown error");
+  // Strip URLs
+  msg = msg.replace(/https?:\/\/[^\s]+/g, "[redacted-url]");
+  // Strip org/repo patterns
+  msg = msg.replace(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+/g, "[redacted]");
+  // Strip JSON-style field values for owner/repo
+  msg = msg.replace(/"owner":\s*"[^"]+"/g, '"owner":"[redacted]"');
+  msg = msg.replace(/"repo":\s*"[^"]+"/g, '"repo":"[redacted]"');
+  msg = msg.replace(/"repository":\s*"[^"]+"/g, '"repository":"[redacted]"');
+  // Strip known org and repo names as standalone words
+  for (const name of [..._orgNames, ..._repoNames]) {
+    if (name.length >= 3) { // avoid redacting tiny strings
+      msg = msg.replace(new RegExp(`\\b${name}\\b`, "gi"), "[redacted]");
+    }
+  }
+  return msg;
+}
+
+/** Wraps a fetch function to catch ALL errors and sanitize them */
+async function safeFetch<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err: unknown) {
     const e = err as { status?: number; response?: { headers?: Record<string, string> } };
+    // Handle rate limits with retry
     if (e.status === 403 || e.status === 429) {
       const resetHeader = e.response?.headers?.["x-ratelimit-reset"];
       const resetTime = resetHeader ? parseInt(resetHeader, 10) * 1000 : Date.now() + 60_000;
       const waitMs = Math.max(resetTime - Date.now(), 1000);
-      console.warn(`  ⏳ Rate limited. Waiting ${Math.round(waitMs / 1000)}s...`);
+      console.warn(`  ⏳ Rate limited, waiting...`);
       await new Promise((r) => setTimeout(r, waitMs));
-      return fn();
+      try {
+        return await fn();
+      } catch (retryErr: unknown) {
+        throw new Error(sanitizeError(retryErr));
+      }
     }
-    throw err;
+    // All other errors — sanitize and rethrow
+    throw new Error(sanitizeError(err));
   }
 }
 
@@ -257,14 +293,16 @@ async function main(): Promise<void> {
 
   const octokit = new Octokit({ auth: args.token });
 
+  // Register org/repo names for error redaction
+  setRedactTargets(args.repos);
+
   // Verify authentication
   const { data: user } = await octokit.rest.users.getAuthenticated();
-  console.log(`✓ Authenticated as ${user.login}`);
+  console.log(`✓ Authenticated`);
 
   const ranges = monthRanges(args.startDate, args.endDate);
   console.log(`\nFetching data for ${ranges.length} month(s): ${ranges.map((r) => `${r.year}-${r.month}`).join(", ")}`);
-  console.log(`Repos: ${args.repos.length} repo(s)`);
-  console.log(`Username: ${args.username}\n`);
+  console.log(`Repos: ${args.repos.length} repo(s)\n`);
 
   for (const range of ranges) {
     const monthLabel = `${range.year}-${range.month}`;
@@ -288,37 +326,37 @@ async function main(): Promise<void> {
       const repoIndex = args.repos.indexOf(repoFull) + 1;
       console.log(`\n  📦 Repo ${repoIndex}/${args.repos.length}`);
 
-      const issuesCreated = await withRateLimit(
+      const issuesCreated = await safeFetch(
         () => fetchIssuesCreated(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssuesCreated.push(...issuesCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const issuesAssigned = await withRateLimit(
+      const issuesAssigned = await safeFetch(
         () => fetchIssuesAssigned(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssuesAssigned.push(...issuesAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const prsCreated = await withRateLimit(
+      const prsCreated = await safeFetch(
         () => fetchPRsCreated(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRsCreated.push(...prsCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const prsAssigned = await withRateLimit(
+      const prsAssigned = await safeFetch(
         () => fetchPRsAssigned(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRsAssigned.push(...prsAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const prReviews = await withRateLimit(
+      const prReviews = await safeFetch(
         () => fetchPRReviews(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRReviews.push(...prReviews.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const issueComments = await withRateLimit(
+      const issueComments = await safeFetch(
         () => fetchIssueComments(octokit, owner, repo, args.username, range.since, range.until)
       );
       allIssueComments.push(...issueComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
-      const prComments = await withRateLimit(
+      const prComments = await safeFetch(
         () => fetchPRComments(octokit, owner, repo, args.username, range.since, range.until)
       );
       allPRComments.push(...prComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
@@ -347,11 +385,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  const e = err as { status?: number; message?: string };
-  if (e.status) {
-    console.error(`Fatal error: HTTP ${e.status} — ${e.message ?? "unknown error"}`);
-  } else {
-    console.error(`Fatal error: ${e.message ?? "unknown error"}`);
-  }
+  console.error(`Fatal error: ${sanitizeError(err)}`);
   process.exit(1);
 });

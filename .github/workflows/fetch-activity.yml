@@ -30,9 +30,10 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+          cache-dependency-path: career-tracker/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: cd career-tracker && npm ci
 
       - name: Determine date range
         id: dates
@@ -52,21 +53,22 @@ jobs:
       - name: Fetch activity data
         env:
           GITHUB_TOKEN: ${{ secrets.CAREER_DATA_PAT }}
+          TRACKED_REPOS: ${{ secrets.TRACKED_REPOS }}
         run: |
-          npx tsx scripts/fetch-activity.ts \
+          npx tsx career-tracker/scripts/fetch-activity.ts \
             --start-date "${{ steps.dates.outputs.start_date }}" \
             --end-date "${{ steps.dates.outputs.end_date }}" \
-            --repos "${{ secrets.TRACKED_REPOS }}" \
             --username "${{ github.repository_owner }}" \
-            --output-dir "./fetched-data" \
-            --token "${{ secrets.CAREER_DATA_PAT }}"
+            --output-dir "./fetched-data" 2>&1 | head -500
 
       - name: Push data to private career-data repo
         env:
           PAT: ${{ secrets.CAREER_DATA_PAT }}
         run: |
-          git clone https://x-access-token:${PAT}@github.com/${{ github.repository_owner }}/career-data.git /tmp/career-data
-          cp -r ./fetched-data/* /tmp/career-data/data/
+          # Clone using credential helper to avoid PAT in URLs/logs
+          git -c "credential.helper=!f(){ echo username=x-access-token; echo password=${PAT}; };f" \
+            clone https://github.com/${{ github.repository_owner }}/career-data.git /tmp/career-data 2>/dev/null
+          cp -r ./fetched-data/* /tmp/career-data/data/ 2>/dev/null || true
           cd /tmp/career-data
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -74,13 +76,11 @@ jobs:
           if git diff --cached --quiet; then
             echo "No new data to commit"
           else
-            git commit -m "data: $(date '+%Y-%m') activity fetch
-
-          Date range: ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}
+            git commit -q -m "data: activity fetch
 
           Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
-            git push
-            echo "✅ Data pushed to career-data repo"
+            git push -q 2>/dev/null
+            echo "✅ Data pushed"
           fi
 
       - name: Save date range for summary workflow
@@ -99,4 +99,4 @@ jobs:
       - name: Clean up sensitive data
         if: always()
         run: |
-          rm -rf ./fetched-data /tmp/career-data
+          rm -rf ./fetched-data /tmp/career-data /tmp/start_date.txt /tmp/end_date.txt

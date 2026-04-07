@@ -23,6 +23,21 @@ function run(cmd: string, silent = false): string {
   }
 }
 
+function runWithEnv(cmd: string, env: Record<string, string>): string {
+  try {
+    return execSync(cmd, {
+      encoding: "utf-8",
+      stdio: "pipe",
+      env: { ...process.env, ...env },
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+const USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+const REPO_RE = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+
 // ---------------------------------------------------------------------------
 // Main bootstrap flow
 // ---------------------------------------------------------------------------
@@ -51,6 +66,10 @@ async function main(): Promise<void> {
 
   // Gather info
   const username = await ask("GitHub username", run("gh api user --jq .login", true));
+  if (!USERNAME_RE.test(username)) {
+    console.error("❌ Invalid username format.");
+    process.exit(1);
+  }
   const profileRepo = `${username}/${username}`;
 
   console.log(`\nProfile repo: ${profileRepo}`);
@@ -65,7 +84,7 @@ async function main(): Promise<void> {
 
   // Repos to track
   console.log("Enter the org/repo names you want to track (comma-separated):");
-  console.log("Example: github/github,github/copilot-api,github/copilot-experiences");
+  console.log("Example: myorg/repo-one,myorg/repo-two,otherog/repo-three");
   const reposInput = await ask("Repos");
   const repos = reposInput.split(",").map((r) => r.trim()).filter(Boolean);
 
@@ -73,7 +92,13 @@ async function main(): Promise<void> {
     console.error("❌ At least one repo is required.");
     process.exit(1);
   }
-  console.log(`✓ Tracking ${repos.length} repos\n`);
+  for (const r of repos) {
+    if (!REPO_RE.test(r)) {
+      console.error(`❌ Invalid repo format: "${r}". Expected: org/repo-name`);
+      process.exit(1);
+    }
+  }
+  console.log(`✓ Tracking ${repos.length} repo(s)\n`);
 
   // PAT
   console.log("You need a Personal Access Token (PAT) with these scopes:");
@@ -81,61 +106,55 @@ async function main(): Promise<void> {
   console.log("  - read:org (read org membership)");
   console.log("\nIf your repos are in an org with SSO, authorize the PAT for SSO.");
   console.log("Create one at: https://github.com/settings/tokens\n");
-  const pat = await ask("Enter your PAT (input hidden in logs)");
+  const pat = await ask("Enter your PAT");
 
   if (!pat) {
     console.error("❌ PAT is required.");
     process.exit(1);
   }
 
-  // Validate PAT
+  // Validate PAT using environment variable (not command-line arg)
   console.log("\nValidating PAT...");
-  try {
-    const result = run(`gh api -H "Authorization: token ${pat}" user --jq .login 2>&1`, true);
-    if (result !== username) {
-      console.warn(`⚠ PAT authenticated as "${result}" (expected "${username}")`);
-    } else {
-      console.log(`✓ PAT valid for ${username}`);
-    }
-  } catch {
+  const patUser = runWithEnv("gh api user --jq .login", { GH_TOKEN: pat });
+  if (!patUser) {
     console.error("❌ PAT validation failed. Check the token and try again.");
     process.exit(1);
+  }
+  if (patUser !== username) {
+    console.warn(`⚠ PAT authenticated as "${patUser}" (expected "${username}")`);
+  } else {
+    console.log("✓ PAT valid");
   }
 
   // Create private career-data repo
   console.log("\n--- Creating private career-data repo ---\n");
   const careerDataRepo = `${username}/career-data`;
-  const existingRepo = run(`gh repo view ${careerDataRepo} --json name 2>&1`, true);
+  const existingRepo = run(`gh repo view ${careerDataRepo} --json name,isPrivate 2>&1`, true);
   if (existingRepo.includes("career-data")) {
-    console.log(`✓ ${careerDataRepo} already exists`);
+    // Verify it's private
+    if (!existingRepo.includes('"isPrivate":true')) {
+      console.error("❌ career-data repo exists but is NOT private! Make it private before continuing.");
+      console.error("   Go to: https://github.com/" + careerDataRepo + "/settings");
+      process.exit(1);
+    }
+    console.log("✓ career-data repo exists and is private");
   } else {
     run(`gh repo create ${careerDataRepo} --private --description "Private raw data store for career achievements tracker" --clone=false`);
-    console.log(`✓ Created ${careerDataRepo}`);
+    console.log("✓ Created private career-data repo");
 
     // Initialize with README
     run(`gh api repos/${careerDataRepo}/contents/README.md -X PUT -f message="Initial commit" -f content="$(echo '# Career Data (Private)\n\nPrivate raw data for the Career Achievements Tracker.' | base64)" 2>&1`, true);
   }
 
-  // Set secrets on the profile repo
+  // Set secrets on the profile repo using stdin (not command-line args)
   console.log("\n--- Configuring GitHub Actions secrets ---\n");
 
-  // Set PAT secret
-  run(`echo "${pat}" | gh secret set CAREER_DATA_PAT --repo ${profileRepo}`);
+  runWithEnv(`bash -c 'echo "$SECRET_VALUE" | gh secret set CAREER_DATA_PAT --repo ${profileRepo}'`, { SECRET_VALUE: pat });
   console.log("✓ Set CAREER_DATA_PAT secret");
 
-  // Set tracked repos as a single comma-separated secret
   const reposCsv = repos.join(",");
-  run(`echo "${reposCsv}" | gh secret set TRACKED_REPOS --repo ${profileRepo}`);
-  console.log(`✓ Set TRACKED_REPOS = ${reposCsv}`);
-
-  // Create achievements directory if not exists
-  console.log("\n--- Setting up achievements directory ---\n");
-  const achievementsCheck = run(`gh api repos/${profileRepo}/contents/achievements 2>&1`, true);
-  if (achievementsCheck.includes("Not Found")) {
-    console.log("achievements/ directory will be created on first workflow run");
-  } else {
-    console.log("✓ achievements/ directory exists");
-  }
+  runWithEnv(`bash -c 'echo "$SECRET_VALUE" | gh secret set TRACKED_REPOS --repo ${profileRepo}'`, { SECRET_VALUE: reposCsv });
+  console.log(`✓ Set TRACKED_REPOS (${repos.length} repos configured)`);
 
   // Create copilot label if not exists
   console.log("\n--- Ensuring 'copilot' label exists ---\n");
@@ -150,7 +169,7 @@ async function main(): Promise<void> {
 
   Profile repo:  ${profileRepo}
   Data repo:     ${careerDataRepo} (private)
-  Tracking:      ${repos.join(", ")}
+  Tracking:      ${repos.length} repo(s)
   Cron:          1st of every month at midnight UTC
 
   Next steps:
@@ -170,8 +189,8 @@ async function main(): Promise<void> {
   rl.close();
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
+main().catch(() => {
+  console.error("Setup failed. Please check the errors above and try again.");
   rl.close();
   process.exit(1);
 });

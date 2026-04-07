@@ -5,7 +5,7 @@ steps:
       node-version: "22"
 
   - name: Install dependencies
-    run: npm ci
+    run: cd career-tracker && npm ci
 
   - name: Configure git
     run: |
