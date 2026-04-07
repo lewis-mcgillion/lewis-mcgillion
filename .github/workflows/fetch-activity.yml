@@ -49,21 +49,6 @@ jobs:
             echo "end_date=$(date -d "$(date '+%Y-%m-01') - 1 day" '+%Y-%m-%d' 2>/dev/null || date -v1d -v-1d '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build repo list from secrets
-        id: repos
-        run: |
-          REPO_LIST=""
-          for repo in "${{ secrets.REPO_1 }}" "${{ secrets.REPO_2 }}" "${{ secrets.REPO_3 }}" "${{ secrets.REPO_4 }}" "${{ secrets.REPO_5 }}" "${{ secrets.REPO_6 }}"; do
-            if [ -n "$repo" ]; then
-              if [ -n "$REPO_LIST" ]; then
-                REPO_LIST="$REPO_LIST,$repo"
-              else
-                REPO_LIST="$repo"
-              fi
-            fi
-          done
-          echo "repo_list=$REPO_LIST" >> "$GITHUB_OUTPUT"
-
       - name: Fetch activity data
         env:
           GITHUB_TOKEN: ${{ secrets.CAREER_DATA_PAT }}
@@ -71,7 +56,7 @@ jobs:
           npx tsx scripts/fetch-activity.ts \
             --start-date "${{ steps.dates.outputs.start_date }}" \
             --end-date "${{ steps.dates.outputs.end_date }}" \
-            --repos "${{ steps.repos.outputs.repo_list }}" \
+            --repos "${{ secrets.TRACKED_REPOS }}" \
             --username "${{ github.repository_owner }}" \
             --output-dir "./fetched-data" \
             --token "${{ secrets.CAREER_DATA_PAT }}"

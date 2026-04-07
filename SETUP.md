@@ -83,11 +83,8 @@ Set these secrets on your **profile repo** (`<username>/<username>`):
 # The PAT you created in step 2
 gh secret set CAREER_DATA_PAT --repo <username>/<username>
 
-# Each repo you want to track (up to 10)
-echo "org/repo-name-1" | gh secret set REPO_1 --repo <username>/<username>
-echo "org/repo-name-2" | gh secret set REPO_2 --repo <username>/<username>
-echo "org/repo-name-3" | gh secret set REPO_3 --repo <username>/<username>
-# ... add as many as needed
+# All repos to track (comma-separated, single secret)
+echo "org/repo-1,org/repo-2,org/repo-3" | gh secret set TRACKED_REPOS --repo <username>/<username>
 ```
 
 ### 5. Create the Copilot Label
@@ -150,14 +147,10 @@ gh workflow run generate-summary.yml \
 
 ### Adding or Removing Tracked Repos
 
-Update the `REPO_*` secrets on your profile repo:
+Update the `TRACKED_REPOS` secret (comma-separated list):
 
 ```bash
-# Add a new repo
-echo "org/new-repo" | gh secret set REPO_7 --repo <username>/<username>
-
-# Remove one (delete the secret)
-gh secret delete REPO_4 --repo <username>/<username>
+echo "org/repo-1,org/repo-2,org/new-repo" | gh secret set TRACKED_REPOS --repo <username>/<username>
 ```
 
 ### Changing the Cron Schedule

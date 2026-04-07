@@ -123,17 +123,10 @@ async function main(): Promise<void> {
   run(`echo "${pat}" | gh secret set CAREER_DATA_PAT --repo ${profileRepo}`);
   console.log("✓ Set CAREER_DATA_PAT secret");
 
-  // Set repo secrets
-  for (let i = 0; i < repos.length; i++) {
-    const secretName = `REPO_${i + 1}`;
-    run(`echo "${repos[i]}" | gh secret set ${secretName} --repo ${profileRepo}`);
-    console.log(`✓ Set ${secretName} = ${repos[i]}`);
-  }
-
-  // Clear unused repo slots (up to 10)
-  for (let i = repos.length; i < 10; i++) {
-    run(`gh secret delete REPO_${i + 1} --repo ${profileRepo} 2>/dev/null`, true);
-  }
+  // Set tracked repos as a single comma-separated secret
+  const reposCsv = repos.join(",");
+  run(`echo "${reposCsv}" | gh secret set TRACKED_REPOS --repo ${profileRepo}`);
+  console.log(`✓ Set TRACKED_REPOS = ${reposCsv}`);
 
   // Create achievements directory if not exists
   console.log("\n--- Setting up achievements directory ---\n");
