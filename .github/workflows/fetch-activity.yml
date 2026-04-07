@@ -95,3 +95,8 @@ jobs:
           path: |
             /tmp/start_date.txt
             /tmp/end_date.txt
+
+      - name: Clean up sensitive data
+        if: always()
+        run: |
+          rm -rf ./fetched-data /tmp/career-data
