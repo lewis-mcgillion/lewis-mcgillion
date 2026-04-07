@@ -37,16 +37,25 @@ jobs:
 
       - name: Determine date range
         id: dates
+        env:
+          INPUT_START_DATE: ${{ inputs.start_date }}
+          INPUT_END_DATE: ${{ inputs.end_date }}
         run: |
-          if [ -n "${{ inputs.start_date }}" ]; then
-            echo "start_date=${{ inputs.start_date }}" >> "$GITHUB_OUTPUT"
+          # Validate date format if provided (YYYY-MM-DD only)
+          if [ -n "$INPUT_START_DATE" ]; then
+            if [[ ! "$INPUT_START_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::Invalid start_date format. Use YYYY-MM-DD."; exit 1
+            fi
+            echo "start_date=$INPUT_START_DATE" >> "$GITHUB_OUTPUT"
           else
             echo "start_date=$(date -d 'last month' '+%Y-%m-01' 2>/dev/null || date -v-1m '+%Y-%m-01')" >> "$GITHUB_OUTPUT"
           fi
-          if [ -n "${{ inputs.end_date }}" ]; then
-            echo "end_date=${{ inputs.end_date }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$INPUT_END_DATE" ]; then
+            if [[ ! "$INPUT_END_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::Invalid end_date format. Use YYYY-MM-DD."; exit 1
+            fi
+            echo "end_date=$INPUT_END_DATE" >> "$GITHUB_OUTPUT"
           else
-            # Last day of previous month
             echo "end_date=$(date -d "$(date '+%Y-%m-01') - 1 day" '+%Y-%m-%d' 2>/dev/null || date -v1d -v-1d '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
           fi
 

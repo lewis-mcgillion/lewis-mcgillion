@@ -146,14 +146,24 @@ async function main(): Promise<void> {
     run(`gh api repos/${careerDataRepo}/contents/README.md -X PUT -f message="Initial commit" -f content="$(echo '# Career Data (Private)\n\nPrivate raw data for the Career Achievements Tracker.' | base64)" 2>&1`, true);
   }
 
-  // Set secrets on the profile repo using stdin (not command-line args)
+  // Set secrets on the profile repo using stdin (not command-line args, not bash -c)
   console.log("\n--- Configuring GitHub Actions secrets ---\n");
 
-  runWithEnv(`bash -c 'echo "$SECRET_VALUE" | gh secret set CAREER_DATA_PAT --repo ${profileRepo}'`, { SECRET_VALUE: pat });
+  execSync(`gh secret set CAREER_DATA_PAT --repo ${profileRepo}`, {
+    input: pat,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, GH_TOKEN: pat },
+  });
   console.log("✓ Set CAREER_DATA_PAT secret");
 
   const reposCsv = repos.join(",");
-  runWithEnv(`bash -c 'echo "$SECRET_VALUE" | gh secret set TRACKED_REPOS --repo ${profileRepo}'`, { SECRET_VALUE: reposCsv });
+  execSync(`gh secret set TRACKED_REPOS --repo ${profileRepo}`, {
+    input: reposCsv,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, GH_TOKEN: pat },
+  });
   console.log(`✓ Set TRACKED_REPOS (${repos.length} repos configured)`);
 
   // Create copilot label if not exists

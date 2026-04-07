@@ -236,7 +236,7 @@ function setRedactTargets(repos: string[]): void {
   _repoNames = [...new Set(repos.map((r) => r.split("/")[1]).filter(Boolean))];
 }
 
-function sanitizeError(err: unknown): string {
+function sanitizeError(err: unknown, username?: string): string {
   const e = err as { status?: number; message?: string };
   if (e.status) return `HTTP ${e.status}`;
   let msg = String(e.message ?? "unknown error");
@@ -254,11 +254,15 @@ function sanitizeError(err: unknown): string {
       msg = msg.replace(new RegExp(`\\b${name}\\b`, "gi"), "[redacted]");
     }
   }
+  // Strip username if provided
+  if (username && username.length >= 3) {
+    msg = msg.replace(new RegExp(`\\b${username}\\b`, "gi"), "[redacted-user]");
+  }
   return msg;
 }
 
 /** Wraps a fetch function to catch ALL errors and sanitize them */
-async function safeFetch<T>(fn: () => Promise<T>): Promise<T> {
+async function safeFetch<T>(fn: () => Promise<T>, username?: string): Promise<T> {
   try {
     return await fn();
   } catch (err: unknown) {
@@ -273,11 +277,11 @@ async function safeFetch<T>(fn: () => Promise<T>): Promise<T> {
       try {
         return await fn();
       } catch (retryErr: unknown) {
-        throw new Error(sanitizeError(retryErr));
+        throw new Error(sanitizeError(retryErr, username));
       }
     }
     // All other errors — sanitize and rethrow
-    throw new Error(sanitizeError(err));
+    throw new Error(sanitizeError(err, username));
   }
 }
 
@@ -327,37 +331,44 @@ async function main(): Promise<void> {
       console.log(`\n  📦 Repo ${repoIndex}/${args.repos.length}`);
 
       const issuesCreated = await safeFetch(
-        () => fetchIssuesCreated(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchIssuesCreated(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allIssuesCreated.push(...issuesCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const issuesAssigned = await safeFetch(
-        () => fetchIssuesAssigned(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchIssuesAssigned(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allIssuesAssigned.push(...issuesAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prsCreated = await safeFetch(
-        () => fetchPRsCreated(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchPRsCreated(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allPRsCreated.push(...prsCreated.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prsAssigned = await safeFetch(
-        () => fetchPRsAssigned(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchPRsAssigned(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allPRsAssigned.push(...prsAssigned.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prReviews = await safeFetch(
-        () => fetchPRReviews(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchPRReviews(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allPRReviews.push(...prReviews.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const issueComments = await safeFetch(
-        () => fetchIssueComments(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchIssueComments(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allIssueComments.push(...issueComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
 
       const prComments = await safeFetch(
-        () => fetchPRComments(octokit, owner, repo, args.username, range.since, range.until)
+        () => fetchPRComments(octokit, owner, repo, args.username, range.since, range.until),
+        args.username
       );
       allPRComments.push(...prComments.map((i) => ({ ...i as object, _source_repo: repoFull })));
     }
@@ -381,10 +392,10 @@ async function main(): Promise<void> {
     console.log(`     PR comments:     ${allPRComments.length}`);
   }
 
-  console.log(`\n✅ Done! Data written to ${args.outputDir}`);
+  console.log(`\n✅ Done!`);
 }
 
 main().catch((err) => {
-  console.error(`Fatal error: ${sanitizeError(err)}`);
+  console.error("Fatal error: data fetch failed");
   process.exit(1);
 });

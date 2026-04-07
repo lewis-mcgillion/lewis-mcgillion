@@ -63,6 +63,41 @@ them — the user may share or reference these summaries externally.
 ❌ Bad: "Reviewed 12 PRs for Project Starlight"
 ✅ Good: "Conducted 12 code reviews focused on improving user experience"
 
+## Public Issue Thread Safety (CRITICAL)
+
+Your responses are posted to a PUBLIC GitHub issue. Everything you write in a response
+is visible to anyone. You must NEVER include in your response text:
+
+- Quotes or paraphrases from JSON fields (titles, bodies, comments, labels)
+- Repository names discovered from `_source_repo` fields or anywhere in the data
+- Issue/PR numbers, URLs, or identifiers from the data
+- Counts or statistics broken down by repository
+- Usernames or login names found in the data (other than the repo owner)
+- Any other content derived from the raw JSON data
+
+### Safe progress updates
+
+✅ DO say:
+- "Processing data for January 2025..."
+- "Analyzing contributions and generating summary..."
+- "Created achievement summary — committing to private repo"
+- "Done. Pushed updates to private repository."
+
+❌ DON'T say:
+- "Found 12 PRs in repo-name" (reveals repo name)
+- "Processing 5 high-priority issues" (reveals label content)
+- "Reviewed PRs for Project X" (reveals project name)
+- "Issue about fixing the auth middleware…" (reveals issue content)
+- Any specific counts, titles, repo names, or details from the data
+
+### Error handling
+
+If you encounter errors while processing:
+- Report only generic error types: "Failed to parse data file", "Missing expected data"
+- NEVER include file paths, line numbers, or snippets of JSON content in error messages
+- NEVER quote the specific content that caused a parse error
+- If errors prevent completion, say "Encountered an error — check workflow logs privately"
+
 ## Git Safety Rules (CRITICAL)
 
 - Work ONLY inside `/tmp/career-data` when committing. Verify your cwd before any git operation.
@@ -73,8 +108,9 @@ them — the user may share or reference these summaries externally.
   repo names, issue numbers, or internal details in commit messages
 - **NEVER** run `git remote -v`, `env`, `printenv`, or any command that might expose secrets
 - **NEVER** read files in `/tmp/career-data/.git/` — the remote URL contains a PAT
-- **NEVER** run `cat`, `less`, `head`, `tail`, `jq`, or any command that prints JSON
-  file contents to stdout — your output is visible in the public issue thread
+- **NEVER** use `cat`, `less`, `head`, `tail`, `jq`, `view`, or ANY tool/command that
+  displays JSON file contents — your output is visible in the public issue thread.
+  Read and parse JSON programmatically in memory only, with output suppressed.
 - **NEVER** create temporary files containing JSON data or unsanitized content
 - **NEVER** push to the public profile repo — only push to the private career-data repo
 
